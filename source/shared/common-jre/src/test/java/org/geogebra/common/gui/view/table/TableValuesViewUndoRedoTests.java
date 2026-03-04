@@ -1,0 +1,218 @@
+/*
+ * GeoGebra - Dynamic Mathematics for Everyone
+ * Copyright (c) GeoGebra GmbH, Altenbergerstr. 69, 4040 Linz, Austria
+ * https://www.geogebra.org
+ * 
+ * This file is licensed by GeoGebra GmbH under the EUPL 1.2 licence and
+ * may be used under the EUPL 1.2 in compatible projects (see Article 5
+ * and the Appendix of EUPL 1.2 for details).
+ * You may obtain a copy of the licence at:
+ * https://interoperable-europe.ec.europa.eu/collection/eupl/eupl-text-eupl-12
+ * 
+ * Note: The overall GeoGebra software package is free to use for
+ * non-commercial purposes only.
+ * See https://www.geogebra.org/license for full licensing details
+ */
+
+package org.geogebra.common.gui.view.table;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import org.geogebra.common.BaseUnitTest;
+import org.geogebra.common.gui.view.table.regression.RegressionSpecificationBuilder;
+import org.geogebra.common.kernel.Kernel;
+import org.geogebra.common.kernel.StringTemplate;
+import org.geogebra.common.kernel.geos.GeoElement;
+import org.geogebra.common.kernel.geos.GeoLine;
+import org.geogebra.common.kernel.geos.GeoList;
+import org.junit.Before;
+import org.junit.Test;
+
+public class TableValuesViewUndoRedoTests extends BaseUnitTest {
+
+	protected TableValuesView view;
+	protected TableValuesModel model;
+	protected TableValuesProcessor processor;
+
+	@Before
+	public void setupUndoRedo() {
+		view = new TableValuesView(getKernel());
+		getKernel().attach(view);
+		model = view.getTableValuesModel();
+		view.clearView();
+		processor = view.getProcessor();
+		activateUndo();
+		getKernel().getConstruction().initUndoInfo();
+	}
+
+	@Test
+	public void testProcessingCreatesUndoPoint() {
+		processor.processInput("1", view.getValues(), 0);
+		assertTrue(getApp().getUndoManager().undoPossible());
+	}
+
+	@Test
+	public void testUndoAddFirst() {
+		GeoLine[] lines = getElementFactory().createLines(2);
+		getApp().storeUndoInfo();
+		shouldHaveUndoPointsAndColumns(1, 1);
+		view.addAndShow(lines[0]);
+		getKernel().undo();
+		assertEquals(1, view.getTableValuesModel().getColumnCount());
+		getKernel().redo();
+		shouldHaveUndoPointsAndColumns(2, 2);
+	}
+
+	@Test
+	public void testUndoAddSecond() {
+		GeoLine[] lines = getElementFactory().createLines(2);
+		getApp().storeUndoInfo();
+		shouldHaveUndoPointsAndColumns(1, 1);
+		view.addAndShow(lines[0]);
+		view.addAndShow(lines[1]);
+		shouldHaveUndoPointsAndColumns(3, 3);
+		getKernel().undo();
+		shouldHaveUndoPointsAndColumns(2, 2);
+		getKernel().redo();
+		shouldHaveUndoPointsAndColumns(3, 3);
+	}
+
+	@Test
+	public void testUndoDeleteFirst() {
+		GeoLine[] lines = getElementFactory().createLines(2);
+		getApp().storeUndoInfo();
+		shouldHaveUndoPointsAndColumns(1, 1);
+		view.addAndShow(lines[0]);
+		view.hideColumn(lines[0]);
+		assertEquals(1, view.getTableValuesModel().getColumnCount());
+		getKernel().undo();
+		assertFalse(view.isEmpty());
+		getKernel().redo();
+		assertEquals(1, view.getTableValuesModel().getColumnCount());
+		shouldHaveUndoPointsAndColumns(3, 1);
+	}
+
+	@Test
+	public void testUndoDeleteSecond() {
+		GeoLine[] lines = getElementFactory().createLines(2);
+		getApp().storeUndoInfo();
+		shouldHaveUndoPointsAndColumns(1, 1);
+		view.addAndShow(lines[0]);
+		view.addAndShow(lines[1]);
+		view.hideColumn(lines[1]);
+		shouldHaveUndoPointsAndColumns(4, 2);
+		getKernel().undo();
+		shouldHaveUndoPointsAndColumns(3, 3);
+		getKernel().redo();
+		shouldHaveUndoPointsAndColumns(4, 2);
+	}
+
+	@Test
+	public void testUndoRange() throws InvalidValuesException {
+		GeoLine[] lines = getElementFactory().createLines(2);
+		getApp().storeUndoInfo();
+		shouldHaveUndoPointsAndColumns(1, 1);
+		view.setValues(0, 10, 2);
+		view.addAndShow(lines[0]);
+		view.setValues(5, 20, 3);
+		shouldHaveUndoPointsAndColumns(4, 2);
+		assertEquals(5, view.getValuesMin(), .1);
+		getKernel().undo();
+		assertEquals(0, view.getValuesMin(), .1);
+		getKernel().redo();
+		assertEquals(5, view.getValuesMin(), .1);
+		shouldHaveUndoPointsAndColumns(4, 2);
+	}
+
+	@Test
+	public void testUndoShowPoints() {
+		TableValuesPoints points = TableValuesPointsImpl.create(getKernel(),
+				getConstruction(), view);
+		GeoLine[] lines = getElementFactory().createLines(2);
+		getApp().storeUndoInfo();
+		shouldHaveUndoPointsAndColumns(1, 1);
+		view.addAndShow(lines[0]);
+		points.setPointsVisible(1, false);
+		points.setPointsVisible(1, true);
+		shouldHaveUndoPointsAndColumns(4, 2);
+		assertTrue(points.arePointsVisible(1));
+		getKernel().undo();
+		assertFalse(points.arePointsVisible(1));
+		getKernel().undo();
+		assertTrue(points.arePointsVisible(1));
+		getKernel().redo();
+		assertFalse(points.arePointsVisible(1));
+		getKernel().redo();
+		assertTrue(points.arePointsVisible(1));
+	}
+
+	@Test
+	public void testUndoAddRow() {
+		processor.processInput("1", view.getValues(), 0);
+		processor.processInput("2", null, 1);
+		processor.processInput("3", null, 2);
+		getKernel().undo();
+		try {
+			processor.processInput("2", (GeoList) view.getEvaluatable(1), 2);
+		} catch (Throwable t) {
+			throw new AssertionError(t);
+		}
+	}
+
+	@Test
+	public void testClearValuesIsUndoable() {
+		processor.processInput("1", view.getValues(), 0);
+		view.clearValues();
+		getKernel().undo();
+		assertEquals(1, model.getRowCount());
+		assertEquals(1, model.getColumnCount());
+		assertEquals("1", model.getCellAt(0, 0).getInput());
+	}
+
+	@Test
+	public void testUndoRegression() {
+		TableValuesPointsImpl.create(getKernel(), getConstruction(), view);
+		processor.processInput("1", null, 0);
+		GeoList list = (GeoList) view.getEvaluatable(1);
+		processor.processInput("1", list, 1);
+		getKernel().undo();
+		assertEquals(1, model.getRowCount());
+		assertEquals(2, model.getColumnCount());
+		assertEquals(1, model.getValueAt(0, 1), Kernel.STANDARD_PRECISION);
+		assertEquals(Double.NaN, model.getValueAt(1, 1), Kernel.STANDARD_PRECISION);
+		assertEquals("1", model.getCellAt(0, 1).getInput());
+		assertEquals("", model.getCellAt(1, 1).getInput());
+	}
+
+	@Test
+	public void testUndoHideColumnWithPlot() {
+		GeoList list = add("{1,2,3}");
+		GeoList listY = add("{4,5,6}");
+		getApp().getSettings().getTable().updateValueList(list);
+		view.add(listY);
+		view.showColumn(listY);
+		GeoElement plot = view.plotRegression(1,
+				new RegressionSpecificationBuilder().getForListSize(3).get(0));
+		getApp().storeUndoInfo();
+		assertEquals(plot.toString(StringTemplate.defaultTemplate), "f(x) = x + 3");
+		assertTrue("plot in construction initially", isInGraphics(plot));
+		view.hideColumn(listY);
+		assertFalse("plot removed when column hidden", isInGraphics(plot));
+		getKernel().undo();
+		assertTrue("plot appears again on undo", isInGraphics(lookup("f")));
+		getKernel().redo();
+		assertFalse("plot disappears on redo", isInGraphics(lookup("f")));
+	}
+
+	private boolean isInGraphics(GeoElement plot) {
+		return getDrawable(plot) != null;
+	}
+
+	private void shouldHaveUndoPointsAndColumns(int expected, int expectCols) {
+		assertEquals(expected, getKernel().getConstruction()
+				.getUndoManager().getHistorySize());
+		assertEquals(expectCols, model.getColumnCount());
+	}
+}
